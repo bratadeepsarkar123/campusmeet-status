@@ -1,0 +1,72 @@
+name: Publish status page
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: status-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the privacy boundary
+        run: node --test
+      - name: Fetch and sanitize private incidents
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.STATUS_READ_TOKEN }}
+          script: |
+            const fs = require('node:fs');
+            const { issuesToIncidents } = require('./scripts/incidents.js');
+            // No raw responses, issue bodies, titles, comments or URLs are saved or logged.
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: 'Varnabha', repo: 'campusmeet', labels: 'incident',
+              state: 'all', per_page: 100, sort: 'created', direction: 'desc'
+            });
+            const now = new Date();
+            const snapshot = { updatedAt: now.toISOString(), incidents: issuesToIncidents(issues, now) };
+            fs.writeFileSync('incidents.json', JSON.stringify(snapshot, null, 2) + '\n');
+      - name: Generate static site
+        run: node scripts/generate.js
+      - name: Commit public snapshot and built site
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- incidents.json site/index.html site/.nojekyll
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update public status snapshot'
+            git push origin "HEAD:${{ github.event.repository.default_branch }}"
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

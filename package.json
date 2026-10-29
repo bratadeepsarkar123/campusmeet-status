@@ -1,0 +1,11 @@
+{
+  "name": "campusmeet-status",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Zero-dependency CampusMeet status-page generator",
+  "scripts": {
+    "build": "node scripts/generate.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=22" }
+}
